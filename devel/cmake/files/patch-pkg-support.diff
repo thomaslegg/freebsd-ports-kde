@@ -1,0 +1,814 @@
+diff --git a/Copyright.txt b/Copyright.txt
+index daaa1d1a1..b7af4c59b 100644
+--- Copyright.txt
++++ Copyright.txt
+@@ -34,6 +34,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ The following individuals and institutions are among the Contributors:
+ 
+ * Aaron C. Meadows <cmake@shadowguarddev.com>
++* Adriaan de Groot <groot@kde.org>
+ * Aleksey Avdeev <solo@altlinux.ru>
+ * Alexander Neundorf <neundorf@kde.org>
+ * Alexander Smorkalov <alexander.smorkalov@itseez.com>
+diff --git a/Help/manual/cmake-modules.7.rst b/Help/manual/cmake-modules.7.rst
+index 1e8342cc8..f5eb1b2ef 100644
+--- Help/manual/cmake-modules.7.rst
++++ Help/manual/cmake-modules.7.rst
+@@ -59,6 +59,7 @@ All Modules
+    /module/CPackCygwin
+    /module/CPackDeb
+    /module/CPackDMG
++   /module/CPackFreeBSD
+    /module/CPackIFW
+    /module/CPackIFWConfigureFile
+    /module/CPackNSIS
+diff --git a/Help/module/CPackFreeBSD.rst b/Help/module/CPackFreeBSD.rst
+new file mode 100644
+index 000000000..083f0cbfa
+--- /dev/null
++++ Help/module/CPackFreeBSD.rst
+@@ -0,0 +1 @@
++.. cmake-module:: ../../Modules/CPackFreeBSD.cmake
+diff --git a/Help/release/dev/cpack-freebsd-pkg.rst b/Help/release/dev/cpack-freebsd-pkg.rst
+new file mode 100644
+index 000000000..1732581eb
+--- /dev/null
++++ Help/release/dev/cpack-freebsd-pkg.rst
+@@ -0,0 +1,5 @@
++cpack-freebsd-pkg
++-----------------
++
++* CPack gained a ``FREEBSD`` generator for FreeBSD ``pkg(8)``, configured
++  by the :module:`CPackFreeBSD` module.
+diff --git a/Modules/CPack.cmake b/Modules/CPack.cmake
+index a63fc8325..391594381 100644
+--- Modules/CPack.cmake
++++ Modules/CPack.cmake
+@@ -471,6 +471,7 @@ if(NOT CPACK_GENERATOR)
+         option(CPACK_BINARY_TZ  "Enable to build TZ packages"     ON)
+       endif()
+       option(CPACK_BINARY_DEB  "Enable to build Debian packages"  OFF)
++      option(CPACK_BINARY_FREEBSD  "Enable to build FreeBSD packages"  OFF)
+       option(CPACK_BINARY_NSIS "Enable to build NSIS packages"    OFF)
+       option(CPACK_BINARY_RPM  "Enable to build RPM packages"     OFF)
+       option(CPACK_BINARY_STGZ "Enable to build STGZ packages"    ON)
+@@ -491,6 +492,7 @@ if(NOT CPACK_GENERATOR)
+   cpack_optional_append(CPACK_GENERATOR  CPACK_BINARY_CYGWIN       CygwinBinary)
+   cpack_optional_append(CPACK_GENERATOR  CPACK_BINARY_DEB          DEB)
+   cpack_optional_append(CPACK_GENERATOR  CPACK_BINARY_DRAGNDROP    DragNDrop)
++  cpack_optional_append(CPACK_GENERATOR  CPACK_BINARY_FREEBSD      FREEBSD)
+   cpack_optional_append(CPACK_GENERATOR  CPACK_BINARY_IFW          IFW)
+   cpack_optional_append(CPACK_GENERATOR  CPACK_BINARY_NSIS         NSIS)
+   cpack_optional_append(CPACK_GENERATOR  CPACK_BINARY_OSXX11       OSXX11)
+@@ -542,6 +544,7 @@ mark_as_advanced(
+   CPACK_BINARY_CYGWIN
+   CPACK_BINARY_DEB
+   CPACK_BINARY_DRAGNDROP
++  CPACK_BINARY_FREEBSD
+   CPACK_BINARY_IFW
+   CPACK_BINARY_NSIS
+   CPACK_BINARY_OSXX11
+diff --git a/Modules/CPackFreeBSD.cmake b/Modules/CPackFreeBSD.cmake
+new file mode 100644
+index 000000000..7fec78a35
+--- /dev/null
++++ Modules/CPackFreeBSD.cmake
+@@ -0,0 +1,246 @@
++# Distributed under the OSI-approved BSD 3-Clause License.  See accompanying
++# file Copyright.txt or https://cmake.org/licensing for details.
++
++#[=======================================================================[.rst:
++CPackFreeBSD
++------------
++
++The built in (binary) CPack FreeBSD (pkg) generator (Unix only)
++
++Variables specific to CPack FreeBSD (pkg) generator
++^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++
++CPackFreeBSD may be used to create pkg(8) packages -- these may be used
++on FreeBSD, DragonflyBSD, NetBSD, OpenBSD, but also on Linux or OSX,
++depending on the installed package-management tools -- using :module:`CPack`.
++
++CPackFreeBSD is a :module:`CPack` generator and uses the ``CPACK_XXX``
++variables used by :module:`CPack`. It tries to re-use packaging information
++that may already be specified for Debian packages for the :module:`CPackDeb`
++generator. it also tries to re-use RPM packaging information when Debian
++does not specify.
++
++CPackFreeBSD generator should work on any host with libpkg installed. The
++packages it produces are specific to the host architecture and ABI.
++
++CPackFreeBSD sets package-metadata through :code:`CPACK_FREEBSD_XXX` variables.
++CPackFreeBSD, unlike CPackDeb, does not specially support componentized
++packages; a single package is created from all the software artifacts
++created through CMake.
++
++All of the variables can be set specifically for FreeBSD packaging in
++the CPackConfig file or in CMakeLists.txt, but most of them have defaults
++that use general settings (e.g. CMAKE_PROJECT_NAME) or Debian-specific
++variables when those make sense (e.g. the homepage of an upstream project
++is usually unchanged by the flavor of packaging). When there is no Debian
++information to fall back on, but the RPM packaging has it, fall back to
++the RPM information (e.g. package license).
++
++.. variable:: CPACK_FREEBSD_PACKAGE_NAME
++
++  Sets the package name (in the package manifest, but also affects the
++  output filename).
++
++  * Mandatory: YES
++  * Default:
++
++    - :variable:`CPACK_PACKAGE_NAME` (this is always set by CPack itself,
++      based on CMAKE_PROJECT_NAME).
++
++.. variable:: CPACK_FREEBSD_PACKAGE_COMMENT
++
++  Sets the package comment. This is the short description displayed by
++  pkg(8) in standard "pkg info" output.
++
++  * Mandatory: YES
++  * Default:
++
++    - :variable:`CPACK_PACKAGE_DESCRIPTION_SUMMARY` (this is always set
++      by CPack itself, if nothing else sets it explicitly).
++    - :variable:`PROJECT_DESCRIPTION` (this can be set with the DESCRIPTION
++      parameter for :command:`project`).
++
++.. variable:: CPACK_FREEBSD_PACKAGE_DESCRIPTION
++
++  Sets the package description. This is the long description of the package,
++  given by "pkg info" with a specific package as argument.
++
++  * Mandatory: YES
++  * Default:
++
++    - :variable:`CPACK_DEBIAN_PACKAGE_DESCRIPTION` (this may be set already
++      for Debian packaging, so we may as well re-use it).
++
++.. variable:: CPACK_FREEBSD_PACKAGE_WWW
++
++  The URL of the web site for this package, preferably (when applicable) the
++  site from which the original source can be obtained and any additional
++  upstream documentation or information may be found.
++
++  * Mandatory: YES
++  * Default:
++
++   - :variable:`CPACK_DEBIAN_PACKAGE_HOMEPAGE` (this may be set already
++     for Debian packaging, so we may as well re-use it).
++
++.. variable:: CPACK_FREEBSD_PACKAGE_LICENSE
++
++  The license, or licenses, which apply to this software package. This must
++  be one or more license-identifiers that pkg recognizes as acceptable license
++  identifiers (e.g. "GPLv2").
++
++  * Mandatory: YES
++  * Default:
++
++    - :variable:`CPACK_RPM_PACKAGE_LICENSE`
++
++.. variable:: CPACK_FREEBSD_PACKAGE_LICENSE_LOGIC
++
++  This variable is only of importance if there is more than one license.
++  The default is "single", which is only applicable to a single license.
++  Other acceptable values are determined by pkg -- those are "dual" or "multi" --
++  meaning choice (OR) or simultaneous (AND) application of the licenses.
++
++  * Mandatory: NO
++  * Default: single
++
++.. variable:: CPACK_FREEBSD_PACKAGE_MAINTAINER
++
++  The FreeBSD maintainer (e.g. kde@freebsd.org) of this package.
++
++  * Mandatory: YES
++  * Default: none
++
++.. variable:: CPACK_FREEBSD_PACKAGE_ORIGIN
++
++  The origin (ports label) of this package; for packages built by CPack
++  outside of the ports system this is of less importance. The default
++  puts the package somewhere under misc/, as a stopgap.
++
++  * Mandatory: YES
++  * Default: misc/<package name>
++
++.. variable:: CPACK_FREEBSD_PACKAGE_CATEGORIES
++
++  The ports categories where this package lives (if it were to be built
++  from ports). If none is set a single category is determined based on
++  the package origin.
++
++  * Mandatory: YES
++  * Default: derived from ORIGIN
++
++.. variable:: CPACK_FREEBSD_PACKAGE_DEPS
++
++  A list of package origins that should be added as package dependencies.
++  These are in the form <category>/<packagename>, e.g. x11/libkonq.
++  No version information needs to be provided (this is not included
++  in the manifest).
++
++  * Mandatory: NO
++  * Default: empty
++#]=======================================================================]
++
++
++
++if(CMAKE_BINARY_DIR)
++  message(FATAL_ERROR "CPackFreeBSD.cmake may only be used by CPack internally.")
++endif()
++
++if(NOT UNIX)
++  message(FATAL_ERROR "CPackFreeBSD.cmake may only be used under UNIX.")
++endif()
++
++
++###
++#
++# These bits are copied from the Debian packaging file; slightly modified.
++# They are used for filling in FreeBSD-packaging variables that can take
++# on values from elsewhere -- e.g. the package description may as well be
++# copied from Debian.
++#
++function(_cpack_freebsd_fallback_var OUTPUT_VAR_NAME)
++  set(FALLBACK_VAR_NAMES ${ARGN})
++
++  set(VALUE "${${OUTPUT_VAR_NAME}}")
++  if(VALUE)
++    return()
++  endif()
++
++  foreach(variable_name IN LISTS FALLBACK_VAR_NAMES)
++    if(${variable_name})
++      set(${OUTPUT_VAR_NAME} "${${variable_name}}" PARENT_SCOPE)
++      set(VALUE "${${variable_name}}")
++      break()
++    endif()
++  endforeach()
++  if(NOT VALUE)
++    message(WARNING "Variable ${OUTPUT_VAR_NAME} could not be given a fallback value from any variable ${FALLBACK_VAR_NAMES}.")
++  endif()
++endfunction()
++
++function(check_required_var VAR_NAME)
++  if(NOT ${VAR_NAME})
++    message(FATAL_ERROR "Variable ${VAR_NAME} is not set.")
++  endif()
++endfunction()
++
++set(_cpack_freebsd_fallback_origin "misc/bogus")
++
++_cpack_freebsd_fallback_var("CPACK_FREEBSD_PACKAGE_NAME"
++    "CPACK_PACKAGE_NAME"
++    "CMAKE_PROJECT_NAME"
++    )
++
++set(_cpack_freebsd_fallback_www "http://example.com/?pkg=${CPACK_FREEBSD_PACKAGE_NAME}")
++
++_cpack_freebsd_fallback_var("CPACK_FREEBSD_PACKAGE_COMMENT"
++    "CPACK_PACKAGE_DESCRIPTION_SUMMARY"
++    )
++
++# TODO: maybe read the PACKAGE_DESCRIPTION file for the longer
++#       FreeBSD pkg-descr?
++_cpack_freebsd_fallback_var("CPACK_FREEBSD_PACKAGE_DESCRIPTION"
++    "CPACK_DEBIAN_PACKAGE_DESCRIPTION"
++    "CPACK_PACKAGE_DESCRIPTION_SUMMARY"
++    "PACKAGE_DESCRIPTION"
++    )
++
++# There's really only one homepage for a project, so
++# re-use the Debian setting if it's there.
++_cpack_freebsd_fallback_var("CPACK_FREEBSD_PACKAGE_WWW"
++    "CPACK_DEBIAN_PACKAGE_HOMEPAGE"
++    "_cpack_freebsd_fallback_www"
++    )
++
++_cpack_freebsd_fallback_var("CPACK_FREEBSD_PACKAGE_VERSION"
++    "CMAKE_PROJECT_VERSION"
++    "${CMAKE_PROJECT_NAME}_VERSION"
++    "PROJECT_VERSION"
++    "CPACK_PACKAGE_VERSION"
++    "CPACK_PACKAGE_VERSION"
++    )
++
++_cpack_freebsd_fallback_var("CPACK_FREEBSD_PACKAGE_MAINTAINER"
++    "CPACK_PACKAGE_CONTACT"
++    )
++
++_cpack_freebsd_fallback_var("CPACK_FREEBSD_PACKAGE_LICENSE"
++    "CPACK_RPM_PACKAGE_LICENSE"
++    )
++
++_cpack_freebsd_fallback_var("CPACK_FREEBSD_PACKAGE_ORIGIN"
++  "_cpack_freebsd_fallback_origin"
++  )
++
++if(NOT CPACK_FREEBSD_PACKAGE_CATEGORIES)
++  string(REGEX REPLACE "/.*" "" CPACK_FREEBSD_PACKAGE_CATEGORIES ${CPACK_FREEBSD_PACKAGE_ORIGIN})
++endif()
++
++check_required_var("CPACK_FREEBSD_PACKAGE_NAME")
++check_required_var("CPACK_FREEBSD_PACKAGE_ORIGIN")
++check_required_var("CPACK_FREEBSD_PACKAGE_VERSION")
++check_required_var("CPACK_FREEBSD_PACKAGE_MAINTAINER")
++check_required_var("CPACK_FREEBSD_PACKAGE_COMMENT")
++check_required_var("CPACK_FREEBSD_PACKAGE_DESCRIPTION")
++check_required_var("CPACK_FREEBSD_PACKAGE_WWW")
++check_required_var("CPACK_FREEBSD_PACKAGE_LICENSE")
+diff --git a/Source/CMakeLists.txt b/Source/CMakeLists.txt
+index 8d683cb3f..df40c2108 100644
+--- Source/CMakeLists.txt
++++ Source/CMakeLists.txt
+@@ -924,11 +924,40 @@ if(CYGWIN)
+     )
+ endif()
+ 
++option(CPACK_ENABLE_FREEBSD_PKG "Add FreeBSD pkg(8) generator to CPack." OFF)
++
+ if(UNIX)
+   set(CPACK_SRCS ${CPACK_SRCS}
+     CPack/cmCPackDebGenerator.cxx
+     CPack/cmCPackRPMGenerator.cxx
+     )
++
++  # Optionally, try to use pkg(8)
++  if(CPACK_ENABLE_FREEBSD_PKG)
++    # On UNIX, you may find FreeBSD's pkg(8) and attendant
++    # library -- it can be used on FreeBSD, Dragonfly, NetBSD,
++    # OpenBSD and also Linux and OSX. Look for the header and
++    # the library; it's a warning on FreeBSD if they're not
++    # found, and informational on other platforms.
++    find_path(FREEBSD_PKG_INCLUDE_DIRS "pkg.h" PATHS /usr/local)
++    if(FREEBSD_PKG_INCLUDE_DIRS)
++      find_library(FREEBSD_PKG_LIBRARIES
++        pkg
++        DOC "FreeBSD pkg(8) library")
++      if(FREEBSD_PKG_LIBRARIES)
++        set(CPACK_SRCS ${CPACK_SRCS}
++          CPack/cmCPackFreeBSDGenerator.cxx
++          )
++      endif()
++    endif()
++
++    if (NOT FREEBSD_PKG_INCLUDE_DIRS OR NOT FREEBSD_PKG_LIBRARIES)
++      message(FATAL_ERROR "CPack needs libpkg(3) to produce FreeBSD packages natively.")
++    endif()
++  else()
++    set(FREEBSD_PKG_INCLUDE_DIRS NOTFOUND)
++    set(FREEBSD_PKG_LIBRARIES NOTFOUND)
++  endif()
+ endif()
+ 
+ if(WIN32)
+@@ -986,6 +1015,11 @@ if(APPLE)
+       "See CMakeFiles/CMakeError.log for details of the failure.")
+   endif()
+ endif()
++if(CPACK_ENABLE_FREEBSD_PKG AND FREEBSD_PKG_INCLUDE_DIRS AND FREEBSD_PKG_LIBRARIES)
++  target_link_libraries(CPackLib ${FREEBSD_PKG_LIBRARIES})
++  include_directories(${FREEBSD_PKG_INCLUDE_DIRS})
++  add_definitions(-DHAVE_FREEBSD_PKG)
++endif()
+ 
+ if(APPLE)
+   add_executable(cmakexbuild cmakexbuild.cxx)
+diff --git a/Source/CPack/cmCPackFreeBSDGenerator.cxx b/Source/CPack/cmCPackFreeBSDGenerator.cxx
+new file mode 100644
+index 000000000..ae17b7995
+--- /dev/null
++++ Source/CPack/cmCPackFreeBSDGenerator.cxx
+@@ -0,0 +1,359 @@
++/* Distributed under the OSI-approved BSD 3-Clause License.  See accompanying
++   file Copyright.txt or https://cmake.org/licensing for details.  */
++#include "cmCPackFreeBSDGenerator.h"
++
++#include "cmArchiveWrite.h"
++#include "cmCPackArchiveGenerator.h"
++#include "cmCPackLog.h"
++#include "cmGeneratedFileStream.h"
++#include "cmSystemTools.h"
++
++// Needed for ::open() and ::stat()
++#include <fcntl.h>
++#include <sys/stat.h>
++#include <sys/types.h>
++#include <unistd.h>
++
++#include <pkg.h>
++
++#include <algorithm>
++
++cmCPackFreeBSDGenerator::cmCPackFreeBSDGenerator()
++  : cmCPackArchiveGenerator(cmArchiveWrite::CompressXZ, "paxr")
++{
++}
++
++int cmCPackFreeBSDGenerator::InitializeInternal()
++{
++  this->SetOptionIfNotSet("CPACK_PACKAGING_INSTALL_PREFIX", "/usr/local");
++  this->SetOption("CPACK_INCLUDE_TOPLEVEL_DIRECTORY", "0");
++  return this->Superclass::InitializeInternal();
++}
++
++cmCPackFreeBSDGenerator::~cmCPackFreeBSDGenerator()
++{
++}
++
++// This is a wrapper, for use only in stream-based output,
++// that will output a string in UCL escaped fashion (in particular,
++// quotes and backslashes are escaped). The list of characters
++// to escape is taken from https://github.com/vstakhov/libucl
++// (which is the reference implementation pkg(8) refers to).
++class EscapeQuotes
++{
++public:
++  const std::string& value;
++
++  EscapeQuotes(const std::string& s)
++    : value(s)
++  {
++  }
++};
++
++// Output a string as "string" with escaping applied.
++cmGeneratedFileStream& operator<<(cmGeneratedFileStream& s,
++                                  const EscapeQuotes& v)
++{
++  s << '"';
++  for (std::string::size_type i = 0; i < v.value.length(); ++i) {
++    char c = v.value[i];
++    switch (c) {
++      case '\n':
++        s << "\\n";
++        break;
++      case '\r':
++        s << "\\r";
++        break;
++      case '\b':
++        s << "\\b";
++        break;
++      case '\t':
++        s << "\\t";
++        break;
++      case '\f':
++        s << "\\f";
++        break;
++      case '\\':
++        s << "\\\\";
++        break;
++      case '"':
++        s << "\\\"";
++        break;
++      default:
++        s << c;
++        break;
++    }
++  }
++  s << '"';
++  return s;
++}
++
++// The following classes are all helpers for writing out the UCL
++// manifest file (it also looks like JSON). ManifestKey just has
++// a (string-valued) key; subclasses add a specific kind of
++// value-type to the key, and implement write_value() to output
++// the corresponding UCL.
++class ManifestKey
++{
++public:
++  std::string key;
++
++  ManifestKey(const std::string& k)
++    : key(k)
++  {
++  }
++
++  virtual ~ManifestKey() {}
++
++  // Output the value associated with this key to the stream @p s.
++  // Format is to be decided by subclasses.
++  virtual void write_value(cmGeneratedFileStream& s) const = 0;
++};
++
++// Basic string-value (e.g. "name": "cmake")
++class ManifestKeyValue : public ManifestKey
++{
++public:
++  std::string value;
++
++  ManifestKeyValue(const std::string& k, const std::string& v)
++    : ManifestKey(k)
++    , value(v)
++  {
++  }
++
++  void write_value(cmGeneratedFileStream& s) const CM_OVERRIDE
++  {
++    s << EscapeQuotes(value);
++  }
++};
++
++// List-of-strings values (e.g. "licenses": ["GPLv2", "LGPLv2"])
++class ManifestKeyListValue : public ManifestKey
++{
++public:
++  typedef std::vector<std::string> VList;
++  VList value;
++
++  ManifestKeyListValue(const std::string& k)
++    : ManifestKey(k)
++  {
++  }
++
++  ManifestKeyListValue& operator<<(const std::string& v)
++  {
++    value.push_back(v);
++    return *this;
++  }
++
++  ManifestKeyListValue& operator<<(const std::vector<std::string>& v)
++  {
++    for (VList::const_iterator it = v.begin(); it != v.end(); ++it) {
++      (*this) << (*it);
++    }
++    return *this;
++  }
++
++  void write_value(cmGeneratedFileStream& s) const CM_OVERRIDE
++  {
++    bool with_comma = false;
++
++    s << '[';
++    for (VList::const_iterator it = value.begin(); it != value.end(); ++it) {
++      s << (with_comma ? ',' : ' ');
++      s << EscapeQuotes(*it);
++      with_comma = true;
++    }
++    s << " ]";
++  }
++};
++
++// Deps: actually a dictionary, but we'll treat it as a
++// list so we only name the deps, and produce dictionary-
++// like output via write_value()
++class ManifestKeyDepsValue : public ManifestKeyListValue
++{
++public:
++  ManifestKeyDepsValue(const std::string& k)
++    : ManifestKeyListValue(k)
++  {
++  }
++
++  void write_value(cmGeneratedFileStream& s) const CM_OVERRIDE
++  {
++    s << "{\n";
++    for (VList::const_iterator it = value.begin(); it != value.end(); ++it) {
++      s << "  \"" << *it << "\": {\"origin\": \"" << *it << "\"},\n";
++    }
++    s << '}';
++  }
++};
++
++// Write one of the key-value classes (above) to the stream @p s
++cmGeneratedFileStream& operator<<(cmGeneratedFileStream& s,
++                                  const ManifestKey& v)
++{
++  s << '"' << v.key << "\": ";
++  v.write_value(s);
++  s << ",\n";
++  return s;
++}
++
++// Look up variable; if no value is set, returns an empty string;
++// basically a wrapper that handles the NULL-ptr return from GetOption().
++std::string cmCPackFreeBSDGenerator::var_lookup(const char* var_name)
++{
++  const char* pv = this->GetOption(var_name);
++  if (!pv) {
++    return std::string();
++  } else {
++    return pv;
++  }
++}
++
++// Produce UCL in the given @p manifest file for the common
++// manifest fields (common to the compact and regular formats),
++// by reading the CPACK_FREEBSD_* variables.
++void cmCPackFreeBSDGenerator::write_manifest_fields(
++  cmGeneratedFileStream& manifest)
++{
++  manifest << ManifestKeyValue("name",
++                               var_lookup("CPACK_FREEBSD_PACKAGE_NAME"));
++  manifest << ManifestKeyValue("origin",
++                               var_lookup("CPACK_FREEBSD_PACKAGE_ORIGIN"));
++  manifest << ManifestKeyValue("version",
++                               var_lookup("CPACK_FREEBSD_PACKAGE_VERSION"));
++  manifest << ManifestKeyValue("maintainer",
++                               var_lookup("CPACK_FREEBSD_PACKAGE_MAINTAINER"));
++  manifest << ManifestKeyValue("comment",
++                               var_lookup("CPACK_FREEBSD_PACKAGE_COMMENT"));
++  manifest << ManifestKeyValue(
++    "desc", var_lookup("CPACK_FREEBSD_PACKAGE_DESCRIPTION"));
++  manifest << ManifestKeyValue("www", var_lookup("CPACK_FREEBSD_PACKAGE_WWW"));
++  std::vector<std::string> licenses;
++  cmSystemTools::ExpandListArgument(
++    var_lookup("CPACK_FREEBSD_PACKAGE_LICENSE"), licenses);
++  std::string licenselogic("single");
++  if (licenses.size() < 1) {
++    cmSystemTools::SetFatalErrorOccured();
++  } else if (licenses.size() > 1) {
++    licenselogic = var_lookup("CPACK_FREEBSD_PACKAGE_LICENSE_LOGIC");
++  }
++  manifest << ManifestKeyValue("licenselogic", licenselogic);
++  manifest << (ManifestKeyListValue("licenses") << licenses);
++  std::vector<std::string> categories;
++  cmSystemTools::ExpandListArgument(
++    var_lookup("CPACK_FREEBSD_PACKAGE_CATEGORIES"), categories);
++  manifest << (ManifestKeyListValue("categories") << categories);
++  manifest << ManifestKeyValue("prefix", var_lookup("CMAKE_INSTALL_PREFIX"));
++  std::vector<std::string> deps;
++  cmSystemTools::ExpandListArgument(var_lookup("CPACK_FREEBSD_PACKAGE_DEPS"),
++                                    deps);
++  if (deps.size() > 0) {
++    manifest << (ManifestKeyDepsValue("deps") << deps);
++  }
++}
++
++// Package only actual files; others are ignored (in particular,
++// intermediate subdirectories are ignored).
++static bool ignore_file(const std::string& filename)
++{
++  struct stat statbuf;
++
++  if (!((stat(filename.c_str(), &statbuf) >= 0) &&
++        ((statbuf.st_mode & S_IFMT) == S_IFREG))) {
++    return true;
++  }
++  // May be other reasons to return false
++  return false;
++}
++
++// Write the given list of @p files to the manifest stream @p s,
++// as the UCL field "files" (which is dictionary-valued, to
++// associate filenames with hashes). All the files are transformed
++// to paths relative to @p toplevel, with a leading / (since the paths
++// in FreeBSD package files are supposed to be absolute).
++void write_manifest_files(cmGeneratedFileStream& s,
++                          const std::string& toplevel,
++                          const std::vector<std::string>& files)
++{
++  const char* c_toplevel = toplevel.c_str();
++  std::vector<std::string>::const_iterator it;
++
++  s << "\"files\": {\n";
++  for (it = files.begin(); it != files.end(); ++it) {
++    s << "  \"/" << cmSystemTools::RelativePath(c_toplevel, it->c_str())
++      << "\": \""
++      << "<sha256>"
++      << "\",\n";
++  }
++  s << "  },\n";
++}
++
++static bool has_suffix(const std::string& str, const std::string& suffix)
++{
++  return str.size() >= suffix.size() &&
++    str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0;
++}
++
++int cmCPackFreeBSDGenerator::PackageFiles()
++{
++  if (!this->ReadListFile("CPackFreeBSD.cmake")) {
++    cmCPackLogger(cmCPackLog::LOG_ERROR,
++                  "Error while execution CPackFreeBSD.cmake" << std::endl);
++    return 0;
++  }
++
++  std::vector<std::string>::const_iterator fileIt;
++  std::string dir = cmSystemTools::GetCurrentWorkingDirectory();
++  cmSystemTools::ChangeDirectory(toplevel);
++
++  files.erase(std::remove_if(files.begin(), files.end(), ignore_file),
++              files.end());
++
++  std::string manifestname = toplevel + "/+MANIFEST";
++  {
++    cmGeneratedFileStream manifest(manifestname.c_str());
++    manifest << "{\n";
++    write_manifest_fields(manifest);
++    write_manifest_files(manifest, toplevel, files);
++    manifest << "}\n";
++  }
++
++  cmCPackLogger(cmCPackLog::LOG_DEBUG, "Toplevel: " << toplevel << std::endl);
++
++  if (WantsComponentInstallation()) {
++    // CASE 1 : COMPONENT ALL-IN-ONE package
++    // If ALL COMPONENTS in ONE package has been requested
++    // then the package file is unique and should be open here.
++    if (componentPackageMethod == ONE_PACKAGE) {
++      return PackageComponentsAllInOne();
++    }
++    // CASE 2 : COMPONENT CLASSICAL package(s) (i.e. not all-in-one)
++    // There will be 1 package for each component group
++    // however one may require to ignore component group and
++    // in this case you'll get 1 package for each component.
++    return PackageComponents(componentPackageMethod ==
++                             ONE_PACKAGE_PER_COMPONENT);
++  }
++
++  std::string output_dir =
++    cmSystemTools::CollapseCombinedPath(toplevel, "../");
++  pkg_create_from_manifest(output_dir.c_str(), ::TXZ, toplevel.c_str(),
++                           manifestname.c_str(), NULL);
++
++  std::string broken_suffix = std::string("-") +
++    var_lookup("CPACK_TOPLEVEL_TAG") + std::string(GetOutputExtension());
++  for (std::vector<std::string>::iterator it = packageFileNames.begin();
++       it != packageFileNames.end(); ++it) {
++    cmCPackLogger(cmCPackLog::LOG_DEBUG, "Packagefile " << *it << std::endl);
++    if (has_suffix(*it, broken_suffix)) {
++      it->replace(it->size() - broken_suffix.size(), std::string::npos,
++                  GetOutputExtension());
++      break;
++    }
++  }
++
++  cmSystemTools::ChangeDirectory(dir);
++  return 1;
++}
+diff --git a/Source/CPack/cmCPackFreeBSDGenerator.h b/Source/CPack/cmCPackFreeBSDGenerator.h
+new file mode 100644
+index 000000000..21f6a0353
+--- /dev/null
++++ Source/CPack/cmCPackFreeBSDGenerator.h
+@@ -0,0 +1,37 @@
++/* Distributed under the OSI-approved BSD 3-Clause License.  See accompanying
++   file Copyright.txt or https://cmake.org/licensing for details.  */
++#ifndef cmCPackFreeBSDGenerator_h
++#define cmCPackFreeBSDGenerator_h
++
++#include <cmConfigure.h>
++
++#include "cmCPackArchiveGenerator.h"
++#include "cmCPackGenerator.h"
++
++class cmGeneratedFileStream;
++
++/** \class cmCPackFreeBSDGenerator
++ * \brief A generator for FreeBSD package files (TXZ with a manifest)
++ *
++ */
++class cmCPackFreeBSDGenerator : public cmCPackArchiveGenerator
++{
++public:
++  cmCPackTypeMacro(cmCPackFreeBSDGenerator, cmCPackArchiveGenerator);
++  /**
++   * Construct generator
++   */
++  cmCPackFreeBSDGenerator();
++  ~cmCPackFreeBSDGenerator() CM_OVERRIDE;
++
++  int InitializeInternal();
++  int PackageFiles();
++
++protected:
++  const char* GetOutputExtension() CM_OVERRIDE { return ".txz"; }
++
++  std::string var_lookup(const char* var_name);
++  void write_manifest_fields(cmGeneratedFileStream&);
++};
++
++#endif
+diff --git a/Source/CPack/cmCPackGeneratorFactory.cxx b/Source/CPack/cmCPackGeneratorFactory.cxx
+index 31f48c7e3..f135059e0 100644
+--- Source/CPack/cmCPackGeneratorFactory.cxx
++++ Source/CPack/cmCPackGeneratorFactory.cxx
+@@ -9,6 +9,9 @@
+ #include "IFW/cmCPackIFWGenerator.h"
+ #include "cmAlgorithms.h"
+ #include "cmCPack7zGenerator.h"
++#ifdef HAVE_FREEBSD_PKG
++#include "cmCPackFreeBSDGenerator.h"
++#endif
+ #include "cmCPackGenerator.h"
+ #include "cmCPackLog.h"
+ #include "cmCPackNSISGenerator.h"
+@@ -132,6 +135,12 @@ cmCPackGeneratorFactory::cmCPackGeneratorFactory()
+                             cmCPackRPMGenerator::CreateGenerator);
+   }
+ #endif
++#ifdef HAVE_FREEBSD_PKG
++  if (cmCPackFreeBSDGenerator::CanGenerate()) {
++    this->RegisterGenerator("FREEBSD", "FreeBSD pkg(8) packages",
++                            cmCPackFreeBSDGenerator::CreateGenerator);
++  }
++#endif
+ }
+ 
+ cmCPackGeneratorFactory::~cmCPackGeneratorFactory()

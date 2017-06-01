@@ -14,3 +14,8 @@ set(LIBLZMA_INCLUDE_DIR "/usr/include" CACHE PATH
     "Directory where LibLZMA headers are located.")
 set(LIBLZMA_LIBRARY "/usr/lib/liblzma.so" CACHE PATH
     "LibLZMA library to link against..")
+
+# Enable pkg(8) support in CPack
+set(CPACK_BINARY_FREEBSD ON CACHE BOOL "Enable pkg(8) support in CPack")
+set(CPACK_ENABLE_FREEBSD_PKG ON CACHE BOOL "Enable pkg(8) support in CPack")
+
